@@ -1,0 +1,151 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+#include <math.h>
+
+void swap(double*, double*);
+void partition_array(double, int);
+void print_array();
+void quick_sort(double *A, int A_size);
+
+int i, arr_size, j, rank, size;
+double *array;
+double pivot, a;
+
+int main(int argc, char *argv[]) {
+
+  int count = 1;
+  MPI_Datatype strided, arr;
+  MPI_Init(&argc, &argv);               /* Initialize MPI               */
+  MPI_Comm_size(MPI_COMM_WORLD, &size); /* Get the number of processors */
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank); /* Get my number                */
+  MPI_Status status[size];
+  MPI_Request request;
+  arr_size=10;
+  array = malloc(arr_size*sizeof(double));
+
+
+  int recv_counts[size];
+  int recv_displ[size];
+
+  //Initialize test array
+  for(i=0;i<arr_size;i++){
+    array[i] =rand()%20;
+  }
+  print_array();
+
+
+  while (count < size){
+    
+    if (rank < count && rank + count < size){
+      //partition array according to pivot
+      pivot = array[0];
+      printf(" pivot = %g \n", pivot);
+      for (i = 0, j = arr_size - 1; ; i++, j--)
+	{
+	  while (array[i] < pivot) i++;
+	  while (array[j] > pivot) j--;
+	  if (i >= j) break;
+ 
+	  swap(&array[i], &array[j]);
+	}     
+      print_array();
+      printf("\n i = %d j = %d\n ", i, j);
+      MPI_Type_vector(1, arr_size-i, arr_size-i, MPI_DOUBLE, &strided);
+      MPI_Type_commit(&strided);
+      MPI_Send(&array[i], 1, strided, rank + count, 111, MPI_COMM_WORLD);   
+      arr_size = i;
+
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank >= count && rank < count * 2){
+      MPI_Recv(array, arr_size, MPI_DOUBLE, rank - count, 111, MPI_COMM_WORLD, &status[rank]);
+      MPI_Get_elements(&status[rank],MPI_DOUBLE,&arr_size);
+      printf("\n Rec elements: %d \n", arr_size);
+      print_array();
+    }
+    count *= 2;
+  }
+
+  printf("\n proc: %d, arr_size: %d \n", rank, arr_size);
+
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  printf("\nAfter barrier, rank = %d arr_size = %d\n", rank, arr_size);
+  quick_sort(array,arr_size);
+  print_array();
+
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Gather(&arr_size, 1, MPI_INT, recv_counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  recv_displ[0] = 0;
+  for(i=1;i<size;i++){
+    recv_displ[i]=recv_displ[i-1]+recv_counts[i-1];
+  }
+
+  if(rank == 0){
+    printf("\n recv_counts: \n");
+    for(i=0; i<size ;i++){
+      printf(" %d ", recv_counts[i]);
+    }
+    printf("\n recv_displ: \n");
+    for(i=0; i<size ;i++){
+      printf(" %d ", recv_displ[i]);
+    }
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+
+
+  MPI_Type_vector(1, arr_size, arr_size, MPI_DOUBLE, &arr);
+  MPI_Type_commit(&arr);
+  MPI_Gatherv(&array,1, arr, array,recv_counts, recv_displ, MPI_DOUBLE,0, MPI_COMM_WORLD);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if(rank == 0){
+ 
+    print_array();
+  }
+  
+  MPI_Finalize();
+  return 0;
+
+}
+
+void quick_sort(double *A, int A_size){
+  int i, j;
+  if(A_size<2) return;
+  int pivot = A[A_size/2];
+  printf("\nproc %d in quick_sort", rank);
+  for (i = 0, j = A_size - 1; ; i++, j--)
+    {
+      while (A[i] < pivot) i++;
+      while (A[j] > pivot) j--;
+      if (i >= j) break;
+ 
+      swap(&A[i], &A[j]);
+    }
+  quick_sort(A,i);
+  quick_sort(A+i, A_size-i);
+}
+
+void swap(double *a, double *b)
+{
+  int temp;
+  temp = *a;
+  *a = *b;
+  *b = temp;
+}
+
+
+void print_array(){
+  printf("\nArray: \n"); 
+  int i;
+  for(i=0; i<arr_size ;i++){
+    printf(" %g ", array[i]);
+  }
+}
+
+
